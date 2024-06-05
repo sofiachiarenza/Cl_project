@@ -48,65 +48,42 @@ function main()
 
     tracers = args["Tracers"]
 
-    #filename = "T_tilde_$tracers/T_tilde_l_$l_string.npy"
-    filename = "test/T_tilde_l_$l_string.npy"
+    filename = "T_tilde_$tracers/T_tilde_l_$l_string.npy"
+    #filename = "test/T_tilde_l_$l_string.npy"
 
     if isfile(filename)
         println("File $filename already exists. Moving on."); flush(stdout)
     else
-        #Import window functions
-        W = npzread("../N5K/input/kernels_fullwidth.npz")
-        WA = W["kernels_sh"]
-        WB = W["kernels_cl"]
-
-        nχ = 100
-        χ = LinRange(13, 7000, nχ) 
-        WA_interp = zeros(5,nχ)
-        WB_interp = zeros(10,nχ)
-
-        for i in 1:5
-            interp = BSplineInterpolation(WA[i,:], W["chi_sh"], 3, :ArcLen, :Average, extrapolate=true)
-            WA_interp[i,:] = interp.(χ)
-        end
-
-        for i in 1:10
-            interp = BSplineInterpolation(WB[i,:], W["chi_cl"], 3, :ArcLen, :Average, extrapolate=true)
-            WB_interp[i,:] = interp.(χ)
-
-            end
-        end
-
-        #import power spectrum
+        z_b = npzread("background/z.npy")
+        χ = npzread("background/chi.npy")
+        z_of_χ = DataInterpolations.AkimaInterpolation(z_b, χ);
         pk_dict = npzread("../N5K/input/pk.npz")
-
-        interp = BSplineInterpolation(W["chi_cl"], W["z_cl"], 3, :ArcLen, :Average, extrapolate=true)
-        my_chi = interp.(pk_dict["z"])
-        my_chi[1] = 0.
-        itp = interpolate((my_chi, log10.(pk_dict["k"])), log10.(pk_dict["pk_lin"]), Gridded(Linear()))
-        itp_with_extrapolation = extrapolate(itp, Line())
+        Pklin = pk_dict["pk_lin"]
+        k = pk_dict["k"]
+        z = pk_dict["z"];
+        y = LinRange(log10(first(k)),log10(last(k)), length(k))
+        x = LinRange(first(z), last(z),length(z))
+        InterpPmm = Interpolations.interpolate(log10.(Pklin),BSpline(Cubic(Line(OnGrid()))))
+        InterpPmm = scale(InterpPmm, x, y)
+        InterpPmm = Interpolations.extrapolate(InterpPmm, Line());
+        power_spectrum(k, χ1, χ2) = @. sqrt(10^InterpPmm(z_of_χ(χ1),log10(k)) * 10^InterpPmm(z_of_χ(χ2),log10(k)));
 
         #Define our grid
         kmax = 200/13 
         kmin = 2.5/7000
-        k = LinRange(kmin, kmax, 40000)
         nχ = 100
-        χ = LinRange(13, 7000, nχ)
-        n_cheb = 128
-        #log_pk_interp = [itp_with_extrapolation(i, j) for i in χ, j in log10.(k)]
+        #NR = 300
+        R = unique(vcat(LinRange(0,0.9,300), LinRange(0.9,1,151)))
+    
 
-        function power_spectrum(k, χ1, χ2, interpolator)
-            P1 = 10 .^interpolator(χ1, k)
-            P2 = 10 .^interpolator(χ2, k)
-            
-            return @. sqrt(P1 * P2)
-        end
-
-        power_spectrum(k, χ1, χ2) = power_spectrum(k, χ1, χ2, itp_with_extrapolation)
-
-        @time T = Will.turbo_T̃(power_spectrum, ℓ, χ, kmin, kmax, tracers)
+        #@time T = Will.turbo_T̃(power_spectrum, ℓ, χ, kmin, kmax, tracers)
+        #@time T = Will.turbo_T̃_Rχ(power_spectrum, ℓ, nχ, NR, kmin, kmax, tracers)
+        @time T = Will.turbo_T̃_Rχ_grid(power_spectrum, ℓ, nχ, R, kmin, kmax, tracers)
 
         npzwrite(filename, T)
     end
+
+end
 
 
 main()
